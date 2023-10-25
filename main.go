@@ -51,7 +51,7 @@ func checkEndianness() {
 	}
 }
 
-func ipv4ToInt32(input string) (string, error) {
+func ipv4ToStringInteger[T int32 | uint32](input string) (string, error) {
 	ip := net.ParseIP(input)
 	if ip == nil {
 		return "", errors.New("invalid ipv4 address")
@@ -70,21 +70,39 @@ func ipv4ToInt32(input string) (string, error) {
 		v4 = v4le
 	}
 
-	i := (*(*int32)(unsafe.Pointer(&v4[0])))
+	i := (*(*T)(unsafe.Pointer(&v4[0])))
 	return strconv.Itoa(int(i)), nil
 }
 
-func int32ToIpv4(input string) (string, error) {
-	i, err := strconv.ParseInt(input, 10, 32)
-	if err != nil {
-		return "", err
+func stringIntegerToIpv4[T int32 | uint32](input string) (string, error) {
+	givenType := fmt.Sprintf("%T", *new(T))
+
+	var value T
+
+	// in also check ranges
+	switch givenType {
+	case "int32":
+		i, err := strconv.ParseInt(input, 10, 32)
+		if err != nil {
+			return "", err
+		}
+
+		value = T(i)
+	case "uint32":
+		i, err := strconv.ParseUint(input, 10, 32)
+		if err != nil {
+			return "", err
+		}
+
+		value = T(i)
+	default:
 	}
 
 	v4 := make([]byte, 4)
-	v4[0] = byte(i >> 24)
-	v4[1] = byte(i >> 16)
-	v4[2] = byte(i >> 8)
-	v4[3] = byte(i)
+	v4[0] = byte(value >> 24)
+	v4[1] = byte(value >> 16)
+	v4[2] = byte(value >> 8)
+	v4[3] = byte(value)
 
 	return net.IP(v4).To4().String(), nil
 }
@@ -92,35 +110,58 @@ func int32ToIpv4(input string) (string, error) {
 func main() {
 	checkEndianness()
 
-	var input string
-	var mode int
+	var (
+		input  string
+		output string
+		mode   int
+	)
+
+	const modeHelp string = "0 - ipv4 to int32\n" +
+		"1 - int32 to ipv4\n" +
+		"2 - ipv4 to uint32\n" +
+		"3 - uint32 to ipv4"
 
 	flag.StringVar(&input, "i", "", "input ip address")
-	flag.IntVar(&mode, "m", -1, "0 - ipv4 to int32\n1 - int32 to ipv4")
+	flag.StringVar(&output, "o", "", "output file (optional)")
+	flag.IntVar(&mode, "m", -1, modeHelp)
 
 	flag.Parse()
-
-	if mode < 0 || mode > 1 {
-		fatal(errors.New("mode must be >= 0 and <= 1"))
-	}
 
 	if input == "" {
 		fatal(errors.New("-i flag must not be empty"))
 	}
 
-	var result string
-	var err error
+	if mode < 0 || mode > 3 {
+		fatal(errors.New("mode must be >= 0 and <= 1"))
+	}
+
+	var (
+		result string
+		err    error
+	)
 
 	switch mode {
 	case 0:
-		result, err = ipv4ToInt32(input)
+		result, err = ipv4ToStringInteger[int32](input)
 	case 1:
-		result, err = int32ToIpv4(input)
+		result, err = stringIntegerToIpv4[int32](input)
+	case 2:
+		result, err = ipv4ToStringInteger[uint32](input)
+	case 3:
+		result, err = stringIntegerToIpv4[uint32](input)
 	}
 
 	if err != nil {
 		fatal(err)
 	}
 
-	fmt.Fprintf(os.Stdout, "%s\n", result)
+	if output == "" {
+		fmt.Fprintf(os.Stdout, "%s\n", result)
+		return
+	}
+
+	if err := os.WriteFile(output, []byte(result), 0644); err != nil {
+		base := errors.New("can not save result to file")
+		fatal(errors.Join(base, err))
+	}
 }
